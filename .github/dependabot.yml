@@ -7,7 +7,12 @@ updates:
     cooldown:
       default-days: 7
   - package-ecosystem: gomod
-    directory: /
+    directories:
+      - /
+      - /normtext
+    ignore:
+      # normtext moves to a new core version in its own release commit.
+      - dependency-name: github.com/go-deps/normalize
     schedule:
       interval: weekly
     cooldown:

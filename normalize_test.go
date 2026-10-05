@@ -180,8 +180,8 @@ type (
 	opOnStruct struct {
 		Item Item `normalize:"trim"`
 	}
-	opOnMap struct {
-		M map[string]string `normalize:"dive,trim"`
+	opOnMapOfInts struct {
+		M map[string]int `normalize:"dive,trim"`
 	}
 	emptyElement struct {
 		S string `normalize:"trim,,lower"`
@@ -201,6 +201,7 @@ type (
 )
 
 func TestStructTagErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		arg   any
@@ -214,9 +215,9 @@ func TestStructTagErrors(t *testing.T) {
 		{"operation on struct elements", &opsOnStructElems{}, normalize.ErrUnsupportedField, "Items"},
 		{"dive on ints", &diveOnInts{}, normalize.ErrUnsupportedField, "N"},
 		{"operation on struct", &opOnStruct{}, normalize.ErrUnsupportedField, "Item"},
-		{"operation on map", &opOnMap{}, normalize.ErrUnsupportedField, "M"},
+		{"operation on map of ints", &opOnMapOfInts{}, normalize.ErrUnsupportedField, "M"},
 		{"empty element", &emptyElement{}, normalize.ErrMalformedTag, "S"},
-		{"repeated dive", &repeatedDive{}, normalize.ErrMalformedTag, "S"},
+		{"dive past strings", &repeatedDive{}, normalize.ErrUnsupportedField, "S"},
 		{"skip not alone", &skipNotAlone{}, normalize.ErrMalformedTag, "S"},
 		{"nested nil pointer", &nestedTypo{}, normalize.ErrUnknownOperation, "Name"},
 		{"nested in empty slice", &nestedInSlice{}, normalize.ErrUnsupportedField, "N"},
@@ -280,7 +281,7 @@ func TestStructUnwrapperErrors(t *testing.T) {
 }
 
 type custom struct {
-	Phone string `normalize:"digits"`
+	Phone string `normalize:"phone"`
 	Name  string `normalize:"trim"`
 }
 
@@ -297,7 +298,7 @@ func TestRegister(t *testing.T) {
 			return -1
 		}, s)
 	}
-	if err := n.Register("digits", digits); err != nil {
+	if err := n.Register("phone", digits); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	in := custom{Phone: "+1 (555) 010-99", Name: " x "}
@@ -323,7 +324,7 @@ func TestRegister(t *testing.T) {
 
 func TestRegisterRejects(t *testing.T) {
 	n := normalize.New()
-	for _, name := range []string{"", "-", "dive", "a,b", "a b", "a\tb"} {
+	for _, name := range []string{"", "-", "dive", "keys", "nilempty", "default", "a,b", "a b", "a\tb", "a=b", "a(", "a)", "a'"} {
 		if err := n.Register(name, strings.TrimSpace); err == nil {
 			t.Errorf("Register(%q): want error", name)
 		}
