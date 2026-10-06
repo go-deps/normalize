@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/go-deps/normalize/discussions
+    about: Ask how to do something or discuss an idea before opening an issue.
+  - name: Security vulnerability
+    url: https://github.com/go-deps/normalize/security/advisories/new
+    about: Report vulnerabilities privately, not in a public issue.

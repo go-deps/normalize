@@ -1,12 +1,22 @@
-# normalize
+<p align="center">
+  <img src=".github/assets/logo.png" width="160" alt="A gopher stacking coloured blocks">
+</p>
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/go-deps/normalize.svg)](https://pkg.go.dev/github.com/go-deps/normalize)
-[![CI](https://github.com/go-deps/normalize/actions/workflows/ci.yml/badge.svg)](https://github.com/go-deps/normalize/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/go-deps/normalize/graph/badge.svg)](https://codecov.io/gh/go-deps/normalize)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/go-deps/normalize/badge)](https://scorecard.dev/viewer/?uri=github.com/go-deps/normalize)
-[![Release](https://img.shields.io/github/v/tag/go-deps/normalize?sort=semver&filter=v*)](https://github.com/go-deps/normalize/tags)
-[![Go version](https://img.shields.io/github/go-mod/go-version/go-deps/normalize)](go.mod)
-[![License](https://img.shields.io/github/license/go-deps/normalize)](LICENSE)
+<h1 align="center">normalize</h1>
+
+<p align="center">
+  <strong>Clean input before it reaches your validator and your database.</strong>
+</p>
+
+<p align="center">
+  <a href="https://pkg.go.dev/github.com/go-deps/normalize"><img src="https://pkg.go.dev/badge/github.com/go-deps/normalize.svg" alt="Go Reference"></a>
+  <a href="https://github.com/go-deps/normalize/actions/workflows/ci.yml"><img src="https://github.com/go-deps/normalize/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/go-deps/normalize"><img src="https://codecov.io/gh/go-deps/normalize/graph/badge.svg" alt="codecov"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/go-deps/normalize"><img src="https://api.scorecard.dev/projects/github.com/go-deps/normalize/badge" alt="OpenSSF Scorecard"></a>
+  <a href="https://github.com/go-deps/normalize/tags"><img src="https://img.shields.io/github/v/tag/go-deps/normalize?sort=semver&filter=v*" alt="Release"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/go-deps/normalize" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/go-deps/normalize" alt="License"></a>
+</p>
 
 Struct-tag driven normalization for Go: trim, re-case, filter, slugify and
 reshape decoded input in place, so that it reaches validation and storage in
@@ -25,6 +35,8 @@ type SignUp struct {
 err := normalize.Struct(&in)
 // {"Alice@example.com", "Ada Lovelace", "adalovelace", ..., ["go-lang", "rust"]}
 ```
+
+## Why normalize
 
 - **No dependencies.** The core uses the standard library only; operations
   that need more, such as Unicode normalization forms and PRECIS profiles,
@@ -574,9 +586,16 @@ Each module is versioned on its own; `normtext` releases are tagged
 
 ## Contributing and security
 
-Issues and pull requests are welcome. Report vulnerabilities privately, as
-described in [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md)
+describes the setup and the checks a change has to pass. Everyone taking
+part follows the [code of conduct](CODE_OF_CONDUCT.md). Report
+vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
 [MIT](LICENSE)
+
+The gopher in the logo is based on the Go gopher designed by
+[Renée French](https://reneefrench.blogspot.com/), licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). This project is
+not affiliated with the Go project or Google.

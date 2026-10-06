@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a new operation, option or API.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use case
+      description: What input do you need to normalize, and why do the existing operations not cover it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The tag syntax or API you have in mind, with example inputs and outputs.
+      render: go
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds you use today, such as a custom operation or a hook.
