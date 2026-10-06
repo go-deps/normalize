@@ -1,0 +1,41 @@
+name: Bug report
+description: A tag or an operation does something it should not.
+labels: [bug]
+body:
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options:
+        - github.com/go-deps/normalize
+        - github.com/go-deps/normalize/normtext
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Module version and Go version
+      placeholder: v0.1.0, go1.27.1
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: The smallest program, test or playground link that shows the problem.
+      render: go
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: The output, the error or the panic with its stack trace.
+    validations:
+      required: true

@@ -4,18 +4,22 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Pull requests share a group per branch, so a new push cancels the old
+  # run; every push to master gets its own group and runs to the end.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
-    name: test (Go ${{ matrix.go }})
+    name: test (${{ matrix.module.name }}, Go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write # Codecov upload over OIDC, no token secret
@@ -23,6 +27,12 @@ jobs:
       fail-fast: false
       matrix:
         go: ["1.26.x", "1.27.x"]
+        module:
+          - { name: normalize, dir: . }
+          - { name: normtext, dir: normtext }
+    defaults:
+      run:
+        working-directory: ${{ matrix.module.dir }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,22 +40,46 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
+          cache-dependency-path: "**/go.sum"
+      - name: go work init
+        working-directory: .
+        run: go work init . ./normtext
       - name: go vet
         run: go vet ./...
       - name: go test
         run: go test -race -count=1 -coverprofile=coverage.out ./...
+      - name: allocation guard (without the race detector)
+        if: matrix.module.name == 'normalize'
+        run: go test -count=1 -run 'Allocate' .
       - name: upload coverage
         if: matrix.go == '1.27.x'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          use_oidc: true
-          files: coverage.out
-          fail_ci_if_error: false
-      - name: fuzz (short)
-        run: go test -run='^$' -fuzz=FuzzStruct -fuzztime=20s .
+          # Pull requests from forks and from Dependabot get no OIDC token;
+          # their upload is best effort and does not fail the build.
+          use_oidc: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]') }}
+          files: ${{ matrix.module.dir }}/coverage.out
+          flags: ${{ matrix.module.name }}
+          fail_ci_if_error: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]') }}
+      - name: fuzz operations (short)
+        if: matrix.go == '1.27.x'
+        run: go test -run='^$' -fuzz='^FuzzOperations$' -fuzztime=20s -fuzzminimizetime=5s .
+      - name: fuzz struct and tags (short)
+        if: matrix.go == '1.27.x' && matrix.module.name == 'normalize'
+        run: |
+          go test -run='^$' -fuzz='^FuzzStruct$' -fuzztime=20s -fuzzminimizetime=5s .
+          go test -run='^$' -fuzz='^FuzzTag$' -fuzztime=20s -fuzzminimizetime=5s .
 
   lint:
+    name: lint (${{ matrix.module.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - { name: normalize, dir: . }
+          - { name: normtext, dir: normtext }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,12 +87,24 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
+          cache: false
+      - name: go work init
+        run: go work init . ./normtext
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
+          working-directory: ${{ matrix.module.dir }}
 
   vulncheck:
+    name: vulncheck (${{ matrix.module.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - { name: normalize, dir: . }
+          - { name: normtext, dir: normtext }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,5 +112,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
+          cache: false
+      - name: go work init
+        run: go work init . ./normtext
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+        working-directory: ${{ matrix.module.dir }}
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

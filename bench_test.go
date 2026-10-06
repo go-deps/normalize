@@ -48,12 +48,13 @@ func BenchmarkStruct(b *testing.B) {
 // operation has work to do; BenchmarkStruct measures already clean input.
 func BenchmarkStructDirty(b *testing.B) {
 	in := newBenchInput()
-	unit := " g "
+	units := make([]string, len(in.Items))
 	b.ReportAllocs()
 	for b.Loop() {
 		in.Title, in.Description.Value, in.Email = "  Pancakes ", " Fluffy. ", " Cook@Example.com "
 		for i := range in.Items {
-			in.Items[i].Name, in.Items[i].Unit = " flour ", &unit
+			units[i] = " g "
+			in.Items[i].Name, in.Items[i].Unit = " flour ", &units[i]
 		}
 		in.Tags[0], in.Tags[1] = " Breakfast ", "Sweet"
 		if err := normalize.Struct(&in); err != nil {
