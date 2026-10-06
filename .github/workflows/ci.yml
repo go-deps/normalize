@@ -70,6 +70,30 @@ jobs:
           go test -run='^$' -fuzz='^FuzzStruct$' -fuzztime=20s -fuzzminimizetime=5s .
           go test -run='^$' -fuzz='^FuzzTag$' -fuzztime=20s -fuzzminimizetime=5s .
 
+  released-core:
+    # Users get the core version required by normtext/go.mod, not the
+    # workspace copy, so normtext is also tested in module mode.
+    name: test (normtext, released core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOWORK: "off"
+    defaults:
+      run:
+        working-directory: normtext
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache-dependency-path: normtext/go.sum
+      - name: go mod verify
+        run: go mod verify
+      - name: go test
+        run: go test -race -count=1 ./...
+
   lint:
     name: lint (${{ matrix.module.name }})
     runs-on: ubuntu-latest

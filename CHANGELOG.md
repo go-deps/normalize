@@ -12,6 +12,8 @@ tagged first.
 
 ## [Unreleased]
 
+## [normtext/0.1.0] - 2026-10-06
+
 ### Added
 
 **`github.com/go-deps/normalize/normtext` v0.1.0**
@@ -20,6 +22,7 @@ tagged first.
   `width=narrow|wide|fold`, `title`, `title=<lang>`, `lower=<lang>`,
   `upper=<lang>` and `precis=username|username-preserved|nickname|password`,
   built on `golang.org/x/text`.
+- Requires `github.com/go-deps/normalize` v0.1.0.
 
 ## [0.1.0] - 2026-10-06
 
@@ -58,5 +61,6 @@ tagged first.
   `WithMaxDepth` and `WithMaxErrors` and reported with `ErrTooDeep` and
   `ErrTooManyErrors`.
 
-[Unreleased]: https://github.com/go-deps/normalize/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/go-deps/normalize/compare/normtext/v0.1.0...HEAD
+[normtext/0.1.0]: https://github.com/go-deps/normalize/releases/tag/normtext/v0.1.0
 [0.1.0]: https://github.com/go-deps/normalize/releases/tag/v0.1.0
