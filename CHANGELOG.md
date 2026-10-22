@@ -12,6 +12,33 @@ tagged first.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-22
+
+### Fixed
+
+**`github.com/go-deps/normalize` v0.1.1**
+
+- `Unwrapper`: validate and parse directives (`default=`, `keys(...)`,
+  `nilempty`) after `dive` against the unwrapped target type at run time
+  instead of panicking or silently ignoring them.
+- `Struct`, `Var`, `Rule`: do not write map entries back when changes or
+  `AfterNormalize` hooks occurred only behind pointers, slices, inner maps
+  or `Unwrapper` values, preventing concurrent map writes on shared clean
+  maps.
+- `AfterNormalizer`: skip `AfterNormalize` promoted through an embedded
+  interface holding a typed-nil pointer or a struct whose own promoted hook
+  is nil; propagate hook suppression through intermediate embedded structs
+  with ambiguous hooks; and call a hook promoted or reached through a shared
+  embedded pointer once.
+- `Struct`, `Var`, `Rule`: terminate on self-referential pointer types
+  (`type P *P`) and cyclic pointer chains without hanging in type
+  dereferencing or hitting the depth limit.
+- Reject non-skip tags on unexported embedded fields with
+  `ErrUnsupportedField`, and reject `NaN` and `Inf` in float `default=`
+  tags with `ErrMalformedTag`.
+- `case=`: avoid allocating a `strings.Builder` when the input is already in
+  the target case.
+
 ## [normtext/0.1.0] - 2026-10-06
 
 ### Added
@@ -61,6 +88,7 @@ tagged first.
   `WithMaxDepth` and `WithMaxErrors` and reported with `ErrTooDeep` and
   `ErrTooManyErrors`.
 
-[Unreleased]: https://github.com/go-deps/normalize/compare/normtext/v0.1.0...HEAD
+[Unreleased]: https://github.com/go-deps/normalize/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/go-deps/normalize/compare/v0.1.0...v0.1.1
 [normtext/0.1.0]: https://github.com/go-deps/normalize/releases/tag/normtext/v0.1.0
 [0.1.0]: https://github.com/go-deps/normalize/releases/tag/v0.1.0

@@ -171,7 +171,8 @@ func FuzzTag(f *testing.F) {
 		f.Add(s, "x,y")
 	}
 	f.Fuzz(func(t *testing.T, tag, arg string) {
-		rule, err := normalize.Compile[string](tag)
+		n := normalize.New()
+		rule, err := normalize.CompileWith[string](n, tag)
 		if err != nil {
 			var te *normalize.TagError
 			if !errors.As(err, &te) || !slices.ContainsFunc(tagErrors, func(e error) bool { return errors.Is(err, e) }) {
@@ -182,10 +183,7 @@ func FuzzTag(f *testing.F) {
 		}
 
 		quoted := "'" + strings.ReplaceAll(arg, "'", "''") + "'"
-		got, err := normalize.Apply("", "default="+quoted)
-		if arg == "" || strings.TrimSpace(arg) == "" {
-			return
-		}
+		got, err := normalize.ApplyWith(n, "", "default="+quoted)
 		if err != nil || got != arg {
 			t.Errorf("default=%s: got %q, %v; want %q", quoted, got, err, arg)
 		}
