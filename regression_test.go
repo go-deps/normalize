@@ -278,6 +278,9 @@ func TestMoreTagNegatives(t *testing.T) {
 		{new(bool), "default=maybe"},
 		{new(uint8), "default=-1"},
 		{new(float32), "default=x"},
+		{new(float64), "default=NaN"},
+		{new(float64), "default=Inf"},
+		{new(float64), "default=-Inf"},
 	} {
 		if err := normalize.Var(tc.ptr, tc.tag); !errors.Is(err, normalize.ErrMalformedTag) {
 			t.Errorf("%s: %v", tc.tag, err)
@@ -289,5 +292,221 @@ func TestMoreTagNegatives(t *testing.T) {
 	bad := testPlugin{name: "badp", param: map[string]normalize.ParamFunc{"a b": repeat}}
 	if err := normalize.New().Use(bad); err == nil {
 		t.Error("Registry.RegisterParam invalid name: want error")
+	}
+	type taggedUnexportedEmbedded struct {
+		*embedded `normalize:"nilempty"`
+	}
+	if err := normalize.Struct(&taggedUnexportedEmbedded{}); !errors.Is(err, normalize.ErrUnsupportedField) {
+		t.Errorf("tagged unexported embedded field: %v", err)
+	}
+}
+
+func TestUnwrapperDiveDirectives(t *testing.T) {
+	type in struct {
+		Ints    Optional[[]int]                `normalize:"dive,default=42"`
+		Strs    Optional[[]string]             `normalize:"dive,trim,default=n/a"`
+		Ptrs    Optional[[]*string]            `normalize:"dive,default=ok"`
+		NilPtrs Optional[[]*string]            `normalize:"dive,trim,nilempty"`
+		Labels  Optional[[1]map[string]string] `normalize:"dive,keys(trim,lower),dive,trim"`
+	}
+	v := in{
+		Ints:    some([]int{0, 7}),
+		Strs:    some([]string{"  ", "x"}),
+		Ptrs:    some([]*string{nil, ptr("y")}),
+		NilPtrs: some([]*string{ptr("  "), ptr(" z ")}),
+		Labels:  some([1]map[string]string{{" EN ": " Hi "}}),
+	}
+	if err := normalize.Struct(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Ints.Value[0] != 42 || v.Ints.Value[1] != 7 {
+		t.Errorf("Ints = %v", v.Ints.Value)
+	}
+	if v.Strs.Value[0] != "n/a" || v.Strs.Value[1] != "x" {
+		t.Errorf("Strs = %q", v.Strs.Value)
+	}
+	if *v.Ptrs.Value[0] != "ok" || *v.Ptrs.Value[1] != "y" {
+		t.Errorf("Ptrs = %v", v.Ptrs.Value)
+	}
+	if v.NilPtrs.Value[0] != nil || *v.NilPtrs.Value[1] != "z" {
+		t.Errorf("NilPtrs = %v", v.NilPtrs.Value)
+	}
+	if v.Labels.Value[0]["en"] != "Hi" {
+		t.Errorf("Labels = %v", v.Labels.Value)
+	}
+
+	type badKeys struct {
+		M Optional[[1]map[int]string] `normalize:"dive,keys(lower)"`
+	}
+	if err := normalize.Struct(&badKeys{M: some([1]map[int]string{{1: "a"}})}); !errors.Is(err, normalize.ErrUnsupportedField) {
+		t.Errorf("dive,keys on int-keyed map in Unwrapper: %v", err)
+	}
+	type badNilEmpty struct {
+		S Optional[[]string] `normalize:"dive,nilempty"`
+	}
+	if err := normalize.Struct(&badNilEmpty{S: some([]string{"a"})}); !errors.Is(err, normalize.ErrUnsupportedField) {
+		t.Errorf("dive,nilempty on strings in Unwrapper: %v", err)
+	}
+	type badDef struct {
+		N Optional[[]int] `normalize:"dive,default=notanint"`
+	}
+	if err := normalize.Struct(&badDef{N: some([]int{0})}); !errors.Is(err, normalize.ErrMalformedTag) {
+		t.Errorf("dive,default=notanint on ints in Unwrapper: %v", err)
+	}
+}
+
+func TestSharedMapWithIndirectHooksIsOnlyRead(t *testing.T) {
+	type ptrHolder struct{ C *cleanElem }
+	sharedPtr := map[string]ptrHolder{"a": {C: &cleanElem{S: "a"}}}
+	sharedSlice := map[string][]cleanElem{"a": {{S: "a"}}}
+	sharedMap := map[string]map[string]cleanElem{"a": {"b": {S: "a"}}}
+	sharedOpt := map[string]Optional[cleanElem]{"a": some(cleanElem{S: "a"})}
+	type root struct {
+		P map[string]ptrHolder
+		S map[string][]cleanElem
+		M map[string]map[string]cleanElem
+		O map[string]Optional[cleanElem]
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 200 {
+				r := root{P: sharedPtr, S: sharedSlice, M: sharedMap, O: sharedOpt}
+				if err := normalize.Struct(&r); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func TestEmbeddedInterfaceTypedNilHook(t *testing.T) {
+	var r *Recipe
+	in := ifaceOuter{AfterNormalizer: r, S: " s "}
+	if err := normalize.Struct(&in); err != nil || in.S != "s" {
+		t.Errorf("typed nil in embedded interface must be skipped: %q %v", in.S, err)
+	}
+	type outerNilPtr struct{ *Recipe }
+	in2 := ifaceOuter{AfterNormalizer: &outerNilPtr{}, S: " s "}
+	if err := normalize.Struct(&in2); err != nil || in2.S != "s" {
+		t.Errorf("struct with nil promoted hook in embedded interface must be skipped: %q %v", in2.S, err)
+	}
+}
+
+type (
+	expHookA struct{ calls *int }
+	expHookB struct{ calls *int }
+	ambigMid struct {
+		expHookA
+		expHookB
+	}
+	outerOverAmbig struct {
+		ambigMid
+		calls *int
+	}
+)
+
+func (h *expHookA) AfterNormalize() error { *h.calls++; return nil }
+func (h *expHookB) AfterNormalize() error { *h.calls++; return nil }
+func (o *outerOverAmbig) AfterNormalize() error {
+	*o.calls++
+	return nil
+}
+
+func TestOuterHookSuppressesDeeperAmbiguousHooks(t *testing.T) {
+	aCalls, bCalls, outCalls := 0, 0, 0
+	in := outerOverAmbig{
+		ambigMid: ambigMid{expHookA: expHookA{calls: &aCalls}, expHookB: expHookB{calls: &bCalls}},
+		calls:    &outCalls,
+	}
+	if err := normalize.Struct(&in); err != nil {
+		t.Fatal(err)
+	}
+	if aCalls != 0 || bCalls != 0 || outCalls != 1 {
+		t.Errorf("got calls a=%d b=%d outer=%d, want 0 0 1", aCalls, bCalls, outCalls)
+	}
+}
+
+func TestSharedEmbeddedPointerHooks(t *testing.T) {
+	type promoted struct{ *Recipe }
+	calls := 0
+	r := &Recipe{Title: " Soup ", calls: &calls}
+	slice := []promoted{{Recipe: r}, {Recipe: r}}
+	if err := normalize.Var(&slice, ""); err != nil || calls != 1 || r.Title != "Soup" {
+		t.Errorf("shared promoted pointer across slice: calls=%d title=%q err=%v", calls, r.Title, err)
+	}
+
+	calls = 0
+	r = &Recipe{Title: " Soup ", calls: &calls}
+	in := struct {
+		Override
+		Other *Recipe
+	}{Override: Override{Recipe: r}, Other: r}
+	if err := normalize.Struct(&in); err != nil || calls != 1 || in.Count != 1 {
+		t.Errorf("shared pointer in Override and sibling field: recipeCalls=%d overrideCount=%d err=%v", calls, in.Count, err)
+	}
+
+	calls = 0
+	r = &Recipe{Title: " Soup ", calls: &calls}
+	in2 := struct {
+		Other *Recipe
+		*Recipe
+	}{Other: r, Recipe: r}
+	if err := normalize.Struct(&in2); err != nil || calls != 1 {
+		t.Errorf("shared pointer in sibling then promoted field: calls=%d err=%v", calls, err)
+	}
+}
+
+type (
+	provA struct {
+		B1, B2 *provB
+		Bad    string `normalize:"nosuchop"`
+	}
+	provB struct {
+		A *provA
+	}
+)
+
+func TestCyclicPointerToPointer(t *testing.T) {
+	type cyclicPtr *cyclicPtr
+	var p cyclicPtr
+	p = &p
+	if err := normalize.Var(&p, ""); err != nil {
+		t.Errorf("cyclic pointer: %v", err)
+	}
+	if err := normalize.Struct(&provA{}); !errors.Is(err, normalize.ErrUnknownOperation) {
+		t.Errorf("provisional plan reuse: %v", err)
+	}
+}
+
+func TestCaseCleanDoesNotAllocate(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector allocates")
+	}
+	type cased struct {
+		Snake    string `normalize:"case=snake"`
+		Kebab    string `normalize:"case=kebab"`
+		Dot      string `normalize:"case=dot"`
+		Constant string `normalize:"case=constant"`
+		Train    string `normalize:"case=train"`
+		Pascal   string `normalize:"case=pascal"`
+		Camel    string `normalize:"case=camel"`
+	}
+	in := cased{
+		Snake:    "prep_time_v2",
+		Kebab:    "prep-time-v2",
+		Dot:      "prep.time.v2",
+		Constant: "PREP_TIME_V2",
+		Train:    "Prep-Time-V2",
+		Pascal:   "PrepTimeID",
+		Camel:    "prepTimeID",
+	}
+	if err := normalize.Struct(&in); err != nil {
+		t.Fatal(err)
+	}
+	if allocs := testing.AllocsPerRun(100, func() { _ = normalize.Struct(&in) }); allocs != 0 {
+		t.Errorf("case= on clean input: %v allocations", allocs)
 	}
 }

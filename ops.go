@@ -359,23 +359,63 @@ func truncate(s string, n int) string {
 // words and how each word is written, given its position.
 type caseStyle struct {
 	sep   string
+	check func(i int, w string) bool
 	write func(b *strings.Builder, i int, w string)
 }
 
 var caseStyles = map[string]caseStyle{
-	"snake":    {"_", writeLower},
-	"kebab":    {"-", writeLower},
-	"dot":      {".", writeLower},
-	"constant": {"_", writeUpper},
-	"train":    {"-", writeTitle},
-	"pascal":   {"", writeInitial},
-	"camel": {"", func(b *strings.Builder, i int, w string) {
-		if i == 0 {
-			writeLower(b, i, w)
-		} else {
-			writeInitial(b, i, w)
+	"snake":    {"_", isLowerWord, writeLower},
+	"kebab":    {"-", isLowerWord, writeLower},
+	"dot":      {".", isLowerWord, writeLower},
+	"constant": {"_", isUpperWord, writeUpper},
+	"train":    {"-", isTitleWord, writeTitle},
+	"pascal":   {"", isInitialWord, writeInitial},
+	"camel": {
+		sep: "",
+		check: func(i int, w string) bool {
+			if i == 0 {
+				return isLowerWord(i, w)
+			}
+			return isInitialWord(i, w)
+		},
+		write: func(b *strings.Builder, i int, w string) {
+			if i == 0 {
+				writeLower(b, i, w)
+			} else {
+				writeInitial(b, i, w)
+			}
+		},
+	},
+}
+
+func isLowerWord(_ int, w string) bool {
+	for _, r := range w {
+		if unicode.ToLower(r) != r {
+			return false
 		}
-	}},
+	}
+	return true
+}
+
+func isUpperWord(_ int, w string) bool {
+	for _, r := range w {
+		if unicode.ToUpper(r) != r {
+			return false
+		}
+	}
+	return true
+}
+
+func isTitleWord(i int, w string) bool {
+	r, size := utf8.DecodeRuneInString(w)
+	return unicode.ToUpper(r) == r && isLowerWord(i, w[size:])
+}
+
+func isInitialWord(i int, w string) bool {
+	if strings.ContainsFunc(w, unicode.IsLower) {
+		return isTitleWord(i, w)
+	}
+	return isUpperWord(i, w)
 }
 
 func writeLower(b *strings.Builder, _ int, w string) {
@@ -435,7 +475,32 @@ func caseParam(arg string) (CheckFunc, error) {
 
 const maxCasePasses = 4
 
+func (st caseStyle) matches(s string) bool {
+	pos := 0
+	ok := true
+	eachWord(s, func(i int, w string) {
+		if !ok {
+			return
+		}
+		sepLen := 0
+		if i > 0 {
+			sepLen = len(st.sep)
+		}
+		if (i > 0 && !strings.HasPrefix(s[pos:], st.sep)) ||
+			!strings.HasPrefix(s[pos+sepLen:], w) ||
+			!st.check(i, w) {
+			ok = false
+			return
+		}
+		pos += sepLen + len(w)
+	})
+	return ok && pos == len(s)
+}
+
 func (st caseStyle) apply(s string) string {
+	if st.matches(s) {
+		return s
+	}
 	var b strings.Builder
 	b.Grow(len(s))
 	eachWord(s, func(i int, w string) {

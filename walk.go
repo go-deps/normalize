@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -196,10 +197,6 @@ func (w *walker) fail(op string, err error) {
 	w.errs = append(w.errs, &FieldError{Path: w.pathString(), Op: op, Err: err})
 }
 
-func (w *walker) unsupported(t reflect.Type) {
-	w.fail("", fmt.Errorf("%w: %s", ErrUnsupportedField, t))
-}
-
 func (w *walker) result() error {
 	w.releaseScratch()
 	errs := w.errs
@@ -215,6 +212,21 @@ func (w *walker) result() error {
 	return errors.Join(errs...)
 }
 
+var (
+	hookVisited   level
+	skipHookVisit level
+)
+
+func (w *walker) isVisited(key visit) bool {
+	for _, k := range w.inline[:w.nInline] {
+		if k == key {
+			return true
+		}
+	}
+	_, ok := w.visited[key]
+	return ok
+}
+
 // markVisited records v, a non-nil pointer or a non-empty slice or map, as
 // walked with plan, and reports whether it was seen before with the same
 // plan. Values of zero size are not recorded: they all share one address
@@ -227,12 +239,7 @@ func (w *walker) markVisited(v reflect.Value, plan *level) (seen bool) {
 	if v.Kind() == reflect.Slice {
 		key.len = v.Len()
 	}
-	for _, k := range w.inline[:w.nInline] {
-		if k == key {
-			return true
-		}
-	}
-	if _, ok := w.visited[key]; ok {
+	if w.isVisited(key) {
 		return true
 	}
 	if w.nInline < len(w.inline) {
@@ -278,7 +285,7 @@ func (w *walker) walkStruct(v reflect.Value) {
 		if !fp.embedded {
 			w.push(seg{kind: segField, name: fp.name})
 		}
-		w.skipHook = fp.embedded && res.hook
+		w.skipHook = fp.embedded && (res.hook || skipHook)
 		w.value(v.Field(fp.index), fp.levels)
 		w.skipHook = false
 		if !fp.embedded {
@@ -299,14 +306,33 @@ func (w *walker) callHook(v reflect.Value, path []int) {
 		return
 	}
 	f := v
-	for _, i := range path {
-		if f.Kind() == reflect.Pointer {
+	for len(path) > 0 {
+		for _, i := range path {
+			if f.Kind() == reflect.Pointer {
+				f = f.Elem()
+			}
+			f = f.Field(i)
+			if k := f.Kind(); (k == reflect.Pointer || k == reflect.Interface) && f.IsNil() {
+				return
+			}
+		}
+		path = nil
+		if f.Kind() == reflect.Interface {
 			f = f.Elem()
+			if f.Kind() == reflect.Pointer && f.IsNil() {
+				return
+			}
+			if base := deref(f.Type()); base.Kind() == reflect.Struct {
+				path = w.n.plan(base).hookPath
+			}
 		}
-		f = f.Field(i)
-		if k := f.Kind(); (k == reflect.Pointer || k == reflect.Interface) && f.IsNil() {
-			return
-		}
+	}
+	recv := f
+	if recv.Kind() == reflect.Struct && recv.CanAddr() {
+		recv = recv.Addr()
+	}
+	if recv.Kind() == reflect.Pointer && recv.Elem().Kind() == reflect.Struct && w.markVisited(recv, &hookVisited) {
+		return
 	}
 	a := v.Addr()
 	if !a.CanInterface() {
@@ -350,10 +376,6 @@ func (w *walker) valueAt(v reflect.Value, lv []level) {
 	}
 	switch v.Kind() {
 	case reflect.String:
-		if len(lv) > 1 {
-			w.unsupported(v.Type())
-			return
-		}
 		if cur != nil {
 			w.str(v, cur, skipDef)
 		}
@@ -376,20 +398,9 @@ func (w *walker) valueAt(v reflect.Value, lv []level) {
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
 		reflect.Float32, reflect.Float64:
-		if cur == nil {
-			return
-		}
-		if len(cur.ops) > 0 || len(lv) > 1 {
-			w.unsupported(v.Type())
-			return
-		}
-		if cur.hasDef && !skipDef && v.IsZero() && !cur.def.IsZero() && v.CanSet() {
+		if cur != nil && cur.hasDef && !skipDef && v.IsZero() && !cur.def.IsZero() && v.CanSet() {
 			v.Set(cur.def)
 			w.changes++
-		}
-	default:
-		if cur != nil && (len(cur.ops) > 0 || len(lv) > 1) {
-			w.unsupported(v.Type())
 		}
 	}
 }
@@ -405,12 +416,21 @@ func (w *walker) pointer(v reflect.Value, lv []level) {
 		}
 		return
 	}
-	if k := v.Elem().Kind(); (k == reflect.Struct || k == reflect.Array) && w.markVisited(v, cur) {
+	plan := cur
+	if w.skipHook && plan == nil {
+		if v.Elem().Kind() == reflect.Struct && w.isVisited(visit{addr: v.Pointer(), typ: v.Type()}) {
+			return
+		}
+		plan = &skipHookVisit
+	}
+	if k := v.Elem().Kind(); (k == reflect.Struct || k == reflect.Array || k == reflect.Pointer) && w.markVisited(v, plan) {
 		return
 	}
+	before := w.changes
 	w.skipDef = cur != nil && cur.hasDef // a present pointer keeps its value
 	w.value(v.Elem(), lv)
 	w.skipDef = false
+	w.changes = before
 	if cur != nil && cur.nilEmpty && v.CanSet() && isEmpty(v.Elem()) {
 		v.SetZero()
 		w.changes++
@@ -447,29 +467,25 @@ func (w *walker) elems(v reflect.Value, lv []level) {
 	if len(lv) > 1 {
 		next = lv[1:]
 	}
-	if len(lv) > 0 && len(lv[0].ops) > 0 {
-		w.unsupported(v.Type())
-		return
-	}
 	if next == nil && !w.n.mayContain(v.Type().Elem()) {
 		return
 	}
 	if v.Kind() == reflect.Slice && v.Len() > 0 && w.markVisited(v, firstLevel(next)) {
 		return
 	}
+	before := w.changes
 	for i := range v.Len() {
 		w.push(seg{kind: segIndex, index: i})
 		w.value(v.Index(i), next)
 		w.pop()
 	}
+	if v.Kind() == reflect.Slice {
+		w.changes = before
+	}
 }
 
 func (w *walker) mapValue(v reflect.Value, lv []level) {
 	cur := firstLevel(lv)
-	if cur != nil && len(cur.ops) > 0 {
-		w.unsupported(v.Type())
-		return
-	}
 	if v.Len() == 0 {
 		if cur != nil && cur.nilEmpty && !v.IsNil() && v.CanSet() {
 			v.SetZero()
@@ -499,15 +515,12 @@ func (w *walker) mapValue(v reflect.Value, lv []level) {
 	if hasValueHook(et) {
 		orig = reflect.New(et).Elem()
 	}
+	beforeMap := w.changes
 	var iter reflect.MapIter
 	iter.Reset(v)
 	for iter.Next() {
 		key.SetIterKey(&iter)
 		tmp.SetIterValue(&iter)
-		var origPtr unsafe.Pointer
-		if et.Kind() == reflect.Pointer {
-			origPtr = tmp.UnsafePointer()
-		}
 		if orig.IsValid() {
 			orig.Set(tmp)
 		}
@@ -518,8 +531,6 @@ func (w *walker) mapValue(v reflect.Value, lv []level) {
 		case w.changes == before:
 			// Unchanged: no write, so values shared between goroutines
 			// are only read.
-		case et.Kind() == reflect.Pointer && tmp.UnsafePointer() == origPtr:
-			// Changed through the pointer; the element itself is the same.
 		case orig.IsValid() && sameBits(tmp, orig):
 			// Only a hook ran, and it changed nothing.
 		case !key.Equal(key): //nolint:gocritic // true only for NaN keys
@@ -529,6 +540,7 @@ func (w *walker) mapValue(v reflect.Value, lv []level) {
 		}
 		w.pop()
 	}
+	w.changes = beforeMap
 }
 
 // sameBits reports whether a and b, addressable values of one type, hold the
@@ -543,9 +555,9 @@ func sameBits(a, b reflect.Value) bool {
 var valueHooks sync.Map // reflect.Type → bool
 
 // hasValueHook reports whether a value of type t holds, directly or in
-// struct fields and array elements, a struct with an AfterNormalize method.
-// Hooks behind pointers, slices and maps do not count: they change shared
-// memory, not the value itself.
+// struct fields and array elements, a struct with an AfterNormalize method
+// or an Unwrapper. Hooks behind pointers, slices and maps do not count:
+// they change shared memory, not the value itself.
 func hasValueHook(t reflect.Type) bool {
 	if r, ok := valueHooks.Load(t); ok {
 		return r.(bool)
@@ -553,7 +565,7 @@ func hasValueHook(t reflect.Type) bool {
 	var has bool
 	switch t.Kind() {
 	case reflect.Struct:
-		has = reflect.PointerTo(t).Implements(afterNormalizerType)
+		has = reflect.PointerTo(t).Implements(afterNormalizerType) || implementsUnwrapper(t)
 		for i := 0; i < t.NumField() && !has; i++ {
 			has = hasValueHook(t.Field(i).Type)
 		}
@@ -619,7 +631,6 @@ func (w *walker) mapKeys(v reflect.Value, ops []op) {
 	for i, c := range changes {
 		v.SetMapIndex(reflect.ValueOf(c.new).Convert(kt), vals[i])
 	}
-	w.changes++
 }
 
 func (w *walker) unwrap(u Unwrapper, lv []level) {
@@ -640,7 +651,20 @@ func (w *walker) unwrap(u Unwrapper, lv []level) {
 		return
 	}
 	elem := tv.Elem()
-	if k := elem.Kind(); (k == reflect.Struct || k == reflect.Array) && w.markVisited(tv, firstLevel(lv)) {
+	plan := firstLevel(lv)
+	if len(lv) > 0 {
+		for i := range lv {
+			if lv[i].hasDef && !lv[i].def.IsValid() {
+				lv = slices.Clone(lv)
+				break
+			}
+		}
+		if err := w.n.checkLevels(elem.Type(), lv); err != nil {
+			w.fail("", err)
+			return
+		}
+	}
+	if k := elem.Kind(); (k == reflect.Struct || k == reflect.Array || k == reflect.Pointer) && w.markVisited(tv, plan) {
 		return
 	}
 	w.value(elem, lv)

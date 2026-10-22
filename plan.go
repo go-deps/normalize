@@ -61,13 +61,18 @@ func (n *Normalizer) plan(t reflect.Type) *planResult {
 // types being built to their depth in the current chain. A type that refers
 // back to one of them gets a provisional plan: an error found later in that
 // type would change it, so it is kept for this round only and not cached.
+type provisionalPlan struct {
+	res *planResult
+	low int
+}
+
 type buildState struct {
 	inProgress  map[reflect.Type]int
-	provisional map[reflect.Type]*planResult
+	provisional map[reflect.Type]provisionalPlan
 }
 
 func newBuildState() *buildState {
-	return &buildState{inProgress: map[reflect.Type]int{}, provisional: map[reflect.Type]*planResult{}}
+	return &buildState{inProgress: map[reflect.Type]int{}, provisional: map[reflect.Type]provisionalPlan{}}
 }
 
 // complete is the low mark of a plan that depends on no type in progress.
@@ -84,8 +89,8 @@ func (n *Normalizer) buildLocked(t reflect.Type, st *buildState) (*planResult, i
 	if d, ok := st.inProgress[t]; ok {
 		return &planResult{}, d
 	}
-	if r, ok := st.provisional[t]; ok {
-		return r, 0
+	if p, ok := st.provisional[t]; ok {
+		return p.res, p.low
 	}
 	depth := len(st.inProgress)
 	st.inProgress[t] = depth
@@ -125,11 +130,11 @@ func (n *Normalizer) buildLocked(t reflect.Type, st *buildState) (*planResult, i
 			res.fields = append(res.fields, fp)
 		}
 	}
-	if low >= depth {
+	if res.err != nil || low >= depth {
 		n.cache.Store(t, &res)
 		return &res, complete
 	}
-	st.provisional[t] = &res
+	st.provisional[t] = provisionalPlan{res: &res, low: low}
 	return &res, low
 }
 
@@ -232,6 +237,9 @@ func (n *Normalizer) parseField(owner reflect.Type, sf reflect.StructField, tag 
 		return &TagError{Type: owner, Field: sf.Name, Tag: tag, Err: err}
 	}
 	if hasTag && tag != "" {
+		if !sf.IsExported() {
+			return fp, tagErr(fmt.Errorf("%w: unexported embedded field %s", ErrUnsupportedField, sf.Type))
+		}
 		levels, err := n.parseLevels(tag)
 		if err != nil {
 			return fp, tagErr(err)
@@ -440,7 +448,10 @@ func parseScalar(t reflect.Type, s string) (reflect.Value, error) {
 		v.SetUint(u)
 	case reflect.Float32, reflect.Float64:
 		f, err := strconv.ParseFloat(s, t.Bits())
-		if err != nil {
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			if err == nil {
+				err = strconv.ErrSyntax
+			}
 			return bad(err)
 		}
 		v.SetFloat(f)
@@ -498,8 +509,18 @@ func mayContain(t reflect.Type, seen map[reflect.Type]bool) bool {
 }
 
 func deref(t reflect.Type) reflect.Type {
+	slow := t
+	step := false
 	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+		next := t.Elem()
+		if next == t || next == slow {
+			return t
+		}
+		t = next
+		if step {
+			slow = slow.Elem()
+		}
+		step = !step
 	}
 	return t
 }
