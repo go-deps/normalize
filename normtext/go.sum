@@ -1,4 +1,4 @@
 github.com/go-deps/normalize v0.1.0 h1:V7p5CFuPDPPrw4dYp9T3CSH3+bl6XlJnwIZsVtfmsxU=
 github.com/go-deps/normalize v0.1.0/go.mod h1:qsivAinKrZ2hfCPLk+RWNawLGPof4CQkAD6ixT9Bx1E=
-golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
-golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+golang.org/x/text v0.44.0 h1:YItdp/mQNGnsmrgpcdA5yQ3bnRxCfo/Tj/iByGW9GGo=
+golang.org/x/text v0.44.0/go.mod h1:S4FR1waQ9LbjQTls97SyRjDaUUVkaM+cXwwuG/G+MwY=
